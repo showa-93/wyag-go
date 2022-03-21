@@ -26,7 +26,7 @@ func NewRepository(path string, force bool) (*Repository, error) {
 		gitdir:   filepath.Join(path, ".git"),
 	}
 
-	if dir, err := os.Stat(r.gitdir); !(force || err == nil || dir.IsDir()) {
+	if dir, err := os.Stat(r.gitdir); !(force || err == nil || (dir != nil && dir.IsDir())) {
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
