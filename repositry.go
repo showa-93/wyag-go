@@ -181,6 +181,33 @@ func (r *Repository) makeDirectory(path string, mkdir bool) error {
 	}
 }
 
+func FindRepository(path string, requred bool) (*Repository, error) {
+	var err error
+	if !filepath.IsAbs(path) {
+		path, err = filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	r, err := NewRepository(path, false)
+	if err == nil {
+		return r, nil
+	}
+	if !errors.Is(err, ErrNotRepositry) {
+		return nil, err
+	}
+
+	parenet := filepath.Join(path, "..")
+	if parenet == path {
+		if requred {
+			return nil, fmt.Errorf("%w path=%s", ErrNotRepositry, path)
+		}
+		return nil, nil
+	}
+
+	return FindRepository(parenet, requred)
+}
+
 func existPath(path string, notExistFunc func() error) (fs.FileInfo, error) {
 	f, err := os.Stat(path)
 	if err != nil {
