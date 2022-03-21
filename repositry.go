@@ -122,8 +122,8 @@ func (r *Repository) Path(path string) string {
 }
 
 func (r *Repository) makeFile(path string, mkdir bool) (f *os.File, err error) {
-	paths := strings.Split(strings.TrimLeft(path, "/"), "/")
-	if _, err := r.makeDirectories(strings.Join(paths[:len(paths)-1], "/"), mkdir); err != nil {
+	paths := strings.Split(strings.TrimLeft(path, string(os.PathSeparator)), string(os.PathSeparator))
+	if _, err := r.makeDirectories(strings.Join(paths[:len(paths)-1], string(os.PathSeparator)), mkdir); err != nil {
 		return nil, err
 	}
 	p := r.Path(path)
@@ -143,14 +143,14 @@ func (r *Repository) makeFile(path string, mkdir bool) (f *os.File, err error) {
 }
 
 func (r *Repository) makeDirectories(path string, mkdir bool) (string, error) {
-	path = strings.Trim(path, "/") + "/"
+	path = strings.Trim(path, string(os.PathSeparator)) + string(os.PathSeparator)
 
 	var i int
 	for {
 		if i < 0 || i >= len(path) {
 			break
 		}
-		i += strings.Index(path[i:], "/")
+		i += strings.Index(path[i:], string(os.PathSeparator))
 		if err := r.makeDirectory(path[:i], mkdir); err != nil {
 			return "", err
 		}
