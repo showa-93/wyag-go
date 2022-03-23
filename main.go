@@ -114,21 +114,19 @@ func main() {
 		BasePath = path
 	}
 
+	var cmd Command
 	switch os.Args[1] {
 	case "init":
-		i := NewInit(os.Args[2:])
-		if err := i.Run(); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+		cmd = NewInit(os.Args[2:])
 	case "cat-file":
-		cf := NewCatFile(os.Args[2:])
-		if err := cf.Run(); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+		cmd = NewCatFile(os.Args[2:])
 	default:
 		fmt.Printf("unknown subcommand %s\n", os.Args[1])
+		os.Exit(1)
 	}
 
+	if err := cmd.Run(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }
