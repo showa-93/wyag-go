@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 var (
 	ErrNotRepositry         = errors.New("not a git repository")
 	ErrMissingConfiguration = errors.New("missing a config file")
+	ErrNotExist             = errors.New("not exist such file or directory")
 )
 
 type Repository struct {
@@ -54,11 +54,12 @@ func CreateRepository(path string) (*Repository, error) {
 		return nil, err
 	}
 
-	fi, err := existPath(r.worktree, func() error { return nil })
+	fi, err := os.Stat(r.worktree)
 	if err != nil {
 		return nil, err
 	}
-	if fi != nil && !fi.IsDir() {
+
+	if !fi.IsDir() {
 		return nil, fmt.Errorf("指定のパスがディレクトリではありません path=%s", r.worktree)
 	}
 
@@ -122,21 +123,30 @@ func (r *Repository) Path(path string) string {
 }
 
 func (r *Repository) makeFile(path string, mkdir bool) (f *os.File, err error) {
-	paths := strings.Split(strings.TrimLeft(path, string(os.PathSeparator)), string(os.PathSeparator))
-	if _, err := r.makeDirectories(strings.Join(paths[:len(paths)-1], string(os.PathSeparator)), mkdir); err != nil {
+	if _, err := r.makeDirectories(filepath.Dir(path), mkdir); err != nil {
 		return nil, err
 	}
-	p := r.Path(path)
-	fi, err := existPath(p, func() error {
-		f, err = os.OpenFile(p, os.O_CREATE|os.O_WRONLY, os.FileMode(0644))
-		return err
-	})
 
+	flag := os.O_WRONLY
+	if mkdir {
+		flag = flag | os.O_CREATE
+	}
+
+	path = r.Path(path)
+	f, err = os.OpenFile(path, flag, os.FileMode(0644))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotExist
+		}
+		return nil, err
+	}
+
+	fi, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	if fi != nil && fi.IsDir() {
-		return nil, fmt.Errorf("指定のパスがファイルでなくディレクトリです path=%s", p)
+	if fi.IsDir() {
+		return nil, fmt.Errorf("指定のパスがファイルでなくディレクトリです path=%s", path)
 	}
 
 	return
@@ -161,24 +171,23 @@ func (r *Repository) makeDirectories(path string, mkdir bool) (string, error) {
 }
 
 func (r *Repository) makeDirectory(path string, mkdir bool) error {
-	p := r.Path(path)
-	f, err := existPath(p, func() error {
-		if mkdir {
-			if err := os.Mkdir(p, os.FileMode(0755)); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	path = r.Path(path)
+	fi, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			if mkdir {
+				return os.Mkdir(path, os.FileMode(0755))
+			}
+			return nil
+		}
 		return err
 	}
 
-	if f == nil || f.IsDir() {
-		return nil
-	} else {
-		return fmt.Errorf("not a directory path=%s", p)
+	if !fi.IsDir() {
+		return fmt.Errorf("not a directory path=%s", path)
 	}
+
+	return nil
 }
 
 func FindRepository(path string, requred bool) (*Repository, error) {
@@ -206,15 +215,4 @@ func FindRepository(path string, requred bool) (*Repository, error) {
 	}
 
 	return FindRepository(parenet, requred)
-}
-
-func existPath(path string, notExistFunc func() error) (fs.FileInfo, error) {
-	f, err := os.Stat(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, err
-		}
-		return nil, notExistFunc()
-	}
-	return f, nil
 }
