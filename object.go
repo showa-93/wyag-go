@@ -11,10 +11,43 @@ import (
 	"strconv"
 )
 
+type ObjectType string
+
+const (
+	Commit = ObjectType("commit")
+	Tree   = ObjectType("treee")
+	Tag    = ObjectType("tag")
+	Blob   = ObjectType("blob")
+)
+
+var (
+	ObjectTypes = []ObjectType{Commit, Tree, Tag, Blob}
+)
+
+func ConvertObjectType(target string) (ObjectType, bool) {
+	for _, t := range ObjectTypes {
+		if string(t) == target {
+			return ObjectType(target), true
+		}
+	}
+	return ObjectType(""), false
+}
+
 type Object interface {
 	Serialize() ([]byte, error)
 	DeSerialize(data []byte) error
 	TypeHeader() string
+}
+
+func NewObject(typeHeader ObjectType, raw []byte) Object {
+	switch typeHeader {
+	case Commit:
+	case Tree:
+	case Tag:
+	case Blob:
+		return NewBlobObject(raw)
+	}
+	return nil
 }
 
 func WriteObject(repo *Repository, o Object, acctually bool) (string, error) {
@@ -73,7 +106,10 @@ func ReadObject(r *Repository, sha string) (Object, error) {
 
 	// 最初の'commit'の位置を探す
 	x := bytes.Index(raw, []byte(" "))
-	typeHeader := string(raw[:x])
+	typeHeader, ok := ConvertObjectType(string(raw[:x]))
+	if !ok {
+		return nil, fmt.Errorf("unknown type tag=%s sha=%s", typeHeader, sha)
+	}
 
 	// オブジェクトのサイズを読み込む
 	y := bytes.Index(raw[x:], []byte("\x00"))
@@ -85,21 +121,24 @@ func ReadObject(r *Repository, sha string) (Object, error) {
 		return nil, fmt.Errorf("malformed object: bad length sha=%s", sha)
 	}
 
-	switch typeHeader {
-	case "commit":
-	case "tree":
-	case "tag":
-	case "blob":
-		return NewBlobObject(raw[x+y+1:]), nil
-	default:
-		return nil, fmt.Errorf("unknown type tag=%s sha=%s", typeHeader, sha)
-	}
-
-	return nil, nil
+	return NewObject(typeHeader, raw[x+y+1:]), nil
 }
 
 func FindObject(r *Repository, name, typeHeader string, follow bool) string {
 	return name
+}
+
+func HashObject(f *os.File, t ObjectType, repo *Repository, write bool) (string, error) {
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	o := NewObject(t, raw)
+	if o == nil {
+		return "", fmt.Errorf("unknown type tag=%s", t)
+	}
+
+	return WriteObject(repo, o, write)
 }
 
 type BlobObject struct {
