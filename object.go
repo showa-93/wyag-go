@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type ObjectType string
@@ -33,15 +34,20 @@ func ConvertObjectType(target string) (ObjectType, bool) {
 	return ObjectType(""), false
 }
 
+// loose objects
+// Gitではpackfileと呼ばれるloose objectsを
+// コンパイルしたような保存メカニズムがある
+// 複雑な処理のため、実装は省く
 type Object interface {
 	Serialize() ([]byte, error)
 	DeSerialize(data []byte) error
-	TypeHeader() string
+	TypeHeader() ObjectType
 }
 
 func NewObject(typeHeader ObjectType, raw []byte) Object {
 	switch typeHeader {
 	case Commit:
+		return NewCommitObject(raw)
 	case Tree:
 	case Tag:
 	case Blob:
@@ -160,6 +166,104 @@ func (o *BlobObject) DeSerialize(data []byte) error {
 	return nil
 }
 
-func (o *BlobObject) TypeHeader() string {
-	return "blob"
+func (o *BlobObject) TypeHeader() ObjectType {
+	return Blob
+}
+
+// Key Value List With Message
+type Kvlm struct {
+	m    map[string][]string
+	keys []string
+}
+
+func (k *Kvlm) Add(key string, value string) {
+	if _, ok := k.m[key]; !ok {
+		k.keys = append(k.keys, key)
+		k.m[key] = make([]string, 0, 1)
+	}
+	k.m[key] = append(k.m[key], value)
+}
+
+func (k *Kvlm) Get(key string) ([]string, bool) {
+	v, ok := k.m[key]
+	return v, ok
+}
+
+func (k *Kvlm) Serialize() []byte {
+	var sb strings.Builder
+	for _, key := range k.keys {
+		if key == "" {
+			continue
+		}
+		values := k.m[key]
+		for _, v := range values {
+			line := fmt.Sprintf("%s %s\n", key, strings.Replace(v, "\n", "\n ", -1))
+			sb.WriteString(line)
+		}
+	}
+
+	message := k.m[""]
+	sb.WriteString("\n" + strings.Join(message, ""))
+
+	return []byte(sb.String())
+}
+
+// コミットオブジェクトのフォーマットにパースする
+func ParseKvlm(raw []byte, start int, kvlm *Kvlm) *Kvlm {
+	if kvlm == nil {
+		kvlm = &Kvlm{
+			m:    make(map[string][]string),
+			keys: []string{},
+		}
+	}
+
+	spc := bytes.Index(raw[start:], []byte(" ")) + start
+	n1 := bytes.Index(raw[start:], []byte("\n")) + start
+
+	// スペーズまたは改行がないことを意味するため、残りはメッセージである
+	if spc < start+1 || n1 < start+1 {
+		kvlm.Add("", string(raw[start+1:]))
+		return kvlm
+	}
+
+	// 各フィールドのキー
+	key := string(raw[start:spc])
+
+	// 行の終わりを見つけるため、スペースの伴わない改行（\n）探します
+	end := start
+	for true {
+		end = bytes.Index(raw[end+1:], []byte("\n")) + end + 1
+		if raw[end+1] != byte(' ') {
+			break
+		}
+	}
+
+	// 先頭行のスペースを削除する
+	value := bytes.Replace(raw[spc+1:end], []byte("\n "), []byte("\n"), -1)
+	kvlm.Add(key, string(value))
+
+	return ParseKvlm(raw, end+1, kvlm)
+}
+
+type CommitObject struct {
+	kvlm *Kvlm
+}
+
+func NewCommitObject(raw []byte) *CommitObject {
+	o := &CommitObject{}
+	o.DeSerialize(raw)
+	return o
+}
+
+func (o *CommitObject) Serialize() ([]byte, error) {
+	return o.kvlm.Serialize(), nil
+}
+
+func (o *CommitObject) DeSerialize(data []byte) error {
+	o.kvlm = ParseKvlm(data, 0, nil)
+	return nil
+}
+
+func (o *CommitObject) TypeHeader() ObjectType {
+	return Commit
 }

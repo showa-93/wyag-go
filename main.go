@@ -116,7 +116,7 @@ func NewHashObjectCommand(args []string) *HashObjectCommand {
 
 	ho.Usage = func() {
 		o := flag.CommandLine.Output()
-		fmt.Fprint(o, "Usage: git hash-object [-w] [-t TYPE] FILE\n")
+		fmt.Fprint(o, "Usage: wyag-go hash-object [-w] [-t TYPE] FILE\n")
 		fmt.Fprint(o, "\tCompute object ID and optionally creates a blob from a file\n")
 	}
 
@@ -169,6 +169,74 @@ func (ho *HashObjectCommand) Run() error {
 	return nil
 }
 
+type LogCommand struct {
+	*flag.FlagSet
+	sha string
+}
+
+func NewLogCommand(args []string) *LogCommand {
+	lc := &LogCommand{}
+	lc.FlagSet = flag.NewFlagSet("log", flag.ExitOnError)
+
+	lc.Usage = func() {
+		o := flag.CommandLine.Output()
+		fmt.Fprint(o, "Usage: wyag-go log COMMIT\n")
+		fmt.Fprint(o, "\tDisplay history of a given commit.\n")
+	}
+
+	lc.Parse(args)
+	if len(lc.Args()) != 1 {
+		fmt.Printf("expected 1 arguments count=%d\n", len(lc.Args()))
+		os.Exit(1)
+	}
+	lc.sha = lc.Args()[0]
+
+	return lc
+}
+
+func (lc *LogCommand) Run() error {
+	repo, err := FindRepository(BasePath, false)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(os.Stdout, "digraph wyaglog{")
+	sha := FindObject(repo, lc.sha, string(Commit), false)
+	LogGraphviz(repo, sha, make(map[string]struct{}))
+	fmt.Fprintln(os.Stdout, "}")
+	return nil
+}
+
+func LogGraphviz(repo *Repository, sha string, exist map[string]struct{}) error {
+	if _, ok := exist[sha]; ok {
+		return nil
+	}
+	exist[sha] = struct{}{}
+
+	c, err := ReadObject(repo, sha)
+	if err != nil {
+		return err
+	}
+	if c.TypeHeader() != Commit {
+		return fmt.Errorf("unexpected type: %s", c.TypeHeader())
+	}
+	commit := c.(*CommitObject)
+	parents, ok := commit.kvlm.Get("parent")
+	if !ok {
+		// 最初のコミットだと存在しない
+		return nil
+	}
+
+	for _, p := range parents {
+		fmt.Fprintf(os.Stdout, "c_%s -> c_%s\n", sha, p)
+		if err := LogGraphviz(repo, p, exist); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("expected subcommands")
@@ -187,6 +255,8 @@ func main() {
 		cmd = NewCatFile(os.Args[2:])
 	case "hash-object":
 		cmd = NewHashObjectCommand(os.Args[2:])
+	case "log":
+		cmd = NewLogCommand(os.Args[2:])
 	default:
 		fmt.Printf("unknown subcommand %s\n", os.Args[1])
 		os.Exit(1)
