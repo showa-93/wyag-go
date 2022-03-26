@@ -72,7 +72,7 @@ func WriteObject(repo *Repository, o Object, acctually bool) (string, error) {
 
 	if acctually {
 		path := "objects/" + sha[0:2] + "/" + sha[2:]
-		f, err := repo.makeFile(path, acctually)
+		f, err := repo.MakeFile(path, acctually)
 		if err != nil {
 			return "", err
 		}

@@ -82,7 +82,7 @@ func CreateRepository(path string) (*Repository, error) {
 	}
 
 	{ // ファイル作成
-		if f, err := r.makeFile("description", true); err != nil {
+		if f, err := r.MakeFile("description", true); err != nil {
 			return nil, err
 		} else if f == nil {
 			return nil, errors.New("file already exists")
@@ -93,7 +93,7 @@ func CreateRepository(path string) (*Repository, error) {
 			}
 		}
 
-		if f, err := r.makeFile("HEAD", true); err != nil {
+		if f, err := r.MakeFile("HEAD", true); err != nil {
 			return nil, err
 		} else if f == nil {
 			return nil, errors.New("file already exists")
@@ -104,7 +104,7 @@ func CreateRepository(path string) (*Repository, error) {
 			}
 		}
 
-		if f, err := r.makeFile("config", true); err != nil {
+		if f, err := r.MakeFile("config", true); err != nil {
 			return nil, err
 		} else if f == nil {
 			return nil, errors.New("file already exists")
@@ -122,12 +122,12 @@ func (r *Repository) Path(path string) string {
 	return filepath.Join(r.gitdir, path)
 }
 
-func (r *Repository) makeFile(path string, mkdir bool) (f *os.File, err error) {
+func (r *Repository) MakeFile(path string, mkdir bool) (f *os.File, err error) {
 	if _, err := r.makeDirectories(filepath.Dir(path), mkdir); err != nil {
 		return nil, err
 	}
 
-	flag := os.O_WRONLY
+	flag := os.O_RDWR
 	if mkdir {
 		flag = flag | os.O_CREATE
 	}

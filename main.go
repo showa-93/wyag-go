@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -395,6 +396,98 @@ func CheckoutTree(repo *Repository, tree *TreeObject, path string) error {
 	return nil
 }
 
+type ShowRefCommand struct {
+	*flag.FlagSet
+}
+
+func NewShowRefCommand(args []string) *ShowRefCommand {
+	c := &ShowRefCommand{}
+	c.FlagSet = flag.NewFlagSet("show-ref", flag.ExitOnError)
+	c.Usage = func() {
+		o := flag.CommandLine.Output()
+		fmt.Fprint(o, "Usage: show-ref\n")
+		fmt.Fprint(o, "\tList references.\n")
+	}
+
+	c.Parse(args)
+	if len(c.Args()) != 0 {
+		fmt.Printf("expected 0 arguments count=%d\n", len(c.Args()))
+		os.Exit(1)
+	}
+
+	return c
+}
+
+func (i *ShowRefCommand) Run() error {
+	repo, err := FindRepository(BasePath, false)
+	if err != nil {
+		return err
+	}
+
+	refs, err := ListRef(repo, "refs", nil)
+	if err != nil {
+		return err
+	}
+
+	for _, ref := range refs {
+		fmt.Fprintf(os.Stdout, "%s %s\n", ref.sha, ref.path)
+	}
+
+	return err
+}
+
+func ResolveRef(repo *Repository, ref string) ([]byte, error) {
+	f, err := repo.MakeFile(ref, false)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	data := b[:len(b)-1]
+
+	if strings.HasPrefix(string(data), "ref: ") {
+		return ResolveRef(repo, string(data[5:]))
+	} else {
+		return data, nil
+	}
+}
+
+type Ref struct {
+	sha  string
+	path string
+}
+
+func ListRef(repo *Repository, path string, refs []Ref) ([]Ref, error) {
+	entries, err := os.ReadDir(repo.Path(path))
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			refs, err = ListRef(repo, filepath.Join(path, e.Name()), refs)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			p := filepath.Join(path, e.Name())
+			b, err := ResolveRef(repo, p)
+			if err != nil {
+				return nil, err
+			}
+			refs = append(refs, Ref{
+				sha:  string(b),
+				path: p,
+			})
+		}
+	}
+
+	return refs, err
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("expected subcommands")
@@ -419,6 +512,8 @@ func main() {
 		cmd = NewListTreeCommand(os.Args[2:])
 	case "checkout":
 		cmd = NewCheckoutCommand(os.Args[2:])
+	case "show-ref":
+		cmd = NewShowRefCommand(os.Args[2:])
 	default:
 		fmt.Printf("unknown subcommand %s\n", os.Args[1])
 		os.Exit(1)
