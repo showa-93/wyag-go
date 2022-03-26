@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var (
@@ -237,6 +238,60 @@ func LogGraphviz(repo *Repository, sha string, exist map[string]struct{}) error 
 	return nil
 }
 
+type ListTreeCommand struct {
+	*flag.FlagSet
+	sha string
+}
+
+func NewListTreeCommand(args []string) *ListTreeCommand {
+	lc := &ListTreeCommand{}
+	lc.FlagSet = flag.NewFlagSet("ls-tree", flag.ExitOnError)
+
+	lc.Usage = func() {
+		o := flag.CommandLine.Output()
+		fmt.Fprint(o, "Usage: wyag-go log COMMIT\n")
+		fmt.Fprint(o, "\tDisplay history of a given commit.\n")
+	}
+
+	lc.Parse(args)
+	if len(lc.Args()) != 1 {
+		fmt.Printf("expected 1 arguments count=%d\n", len(lc.Args()))
+		os.Exit(1)
+	}
+	lc.sha = lc.Args()[0]
+
+	return lc
+}
+
+func (lc *ListTreeCommand) Run() error {
+	repo, err := FindRepository(BasePath, false)
+	if err != nil {
+		return err
+	}
+
+	sha := FindObject(repo, lc.sha, string(Tree), false)
+	o, err := ReadObject(repo, sha)
+	if err != nil {
+		return err
+	}
+
+	for _, item := range o.(*TreeObject).items {
+		co, err := ReadObject(repo, item.sha)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout,
+			"%s%s %s %s\t%s\n",
+			strings.Repeat("0", 6-len(item.mode)),
+			item.mode,
+			co.TypeHeader(),
+			item.sha,
+			item.path)
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("expected subcommands")
@@ -257,6 +312,8 @@ func main() {
 		cmd = NewHashObjectCommand(os.Args[2:])
 	case "log":
 		cmd = NewLogCommand(os.Args[2:])
+	case "ls-tree":
+		cmd = NewListTreeCommand(os.Args[2:])
 	default:
 		fmt.Printf("unknown subcommand %s\n", os.Args[1])
 		os.Exit(1)

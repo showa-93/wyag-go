@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,7 +18,7 @@ type ObjectType string
 
 const (
 	Commit = ObjectType("commit")
-	Tree   = ObjectType("treee")
+	Tree   = ObjectType("tree")
 	Tag    = ObjectType("tag")
 	Blob   = ObjectType("blob")
 )
@@ -44,16 +46,17 @@ type Object interface {
 	TypeHeader() ObjectType
 }
 
-func NewObject(typeHeader ObjectType, raw []byte) Object {
+func NewObject(typeHeader ObjectType, raw []byte) (Object, error) {
 	switch typeHeader {
 	case Commit:
-		return NewCommitObject(raw)
+		return NewCommitObject(raw), nil
 	case Tree:
+		return NewTreeObject(raw)
 	case Tag:
 	case Blob:
-		return NewBlobObject(raw)
+		return NewBlobObject(raw), nil
 	}
-	return nil
+	return nil, errors.New("unknown object type")
 }
 
 func WriteObject(repo *Repository, o Object, acctually bool) (string, error) {
@@ -127,7 +130,7 @@ func ReadObject(r *Repository, sha string) (Object, error) {
 		return nil, fmt.Errorf("malformed object: bad length sha=%s", sha)
 	}
 
-	return NewObject(typeHeader, raw[x+y+1:]), nil
+	return NewObject(typeHeader, raw[x+y+1:])
 }
 
 func FindObject(r *Repository, name, typeHeader string, follow bool) string {
@@ -139,9 +142,9 @@ func HashObject(f *os.File, t ObjectType, repo *Repository, write bool) (string,
 	if err != nil {
 		return "", err
 	}
-	o := NewObject(t, raw)
-	if o == nil {
-		return "", fmt.Errorf("unknown type tag=%s", t)
+	o, err := NewObject(t, raw)
+	if err == nil {
+		return "", fmt.Errorf("unknown type tag=%s %w", t, err)
 	}
 
 	return WriteObject(repo, o, write)
@@ -266,4 +269,93 @@ func (o *CommitObject) DeSerialize(data []byte) error {
 
 func (o *CommitObject) TypeHeader() ObjectType {
 	return Commit
+}
+
+// 複数のファイルをまとめて格納するオブジェクト
+type TreeObject struct {
+	items []*TreeLeafObject
+}
+
+func NewTreeObject(raw []byte) (*TreeObject, error) {
+	o := &TreeObject{}
+	return o, o.DeSerialize(raw)
+}
+
+func (o *TreeObject) Serialize() ([]byte, error) {
+	var sb strings.Builder
+	for _, i := range o.items {
+		sb.WriteString(i.mode)
+		sb.WriteString(" ")
+		sb.WriteString(i.path)
+		sb.WriteString("\x00")
+		x, err := strconv.ParseUint(i.sha, 16, 64)
+		if err != nil {
+			return nil, err
+		}
+		buf := make([]byte, 20)
+		if n := binary.PutUvarint(buf, x); len(buf) != n {
+			return nil, errors.New("invalid sha")
+		}
+		sb.Write(buf)
+	}
+	return []byte(sb.String()), nil
+}
+
+func (o *TreeObject) DeSerialize(data []byte) error {
+	items, err := ParseTree(data)
+	if err != nil {
+		return err
+	}
+	o.items = items
+	return nil
+}
+
+func (o *TreeObject) TypeHeader() ObjectType {
+	return Tree
+}
+
+type TreeLeafObject struct {
+	mode string // ファイルモード
+	path string // ファイルのパス
+	sha  string // 20byteのバイナリエンコーディングされたobjectのsha1
+}
+
+func NewTreeLeafObject(mode, path, sha string) *TreeLeafObject {
+	return &TreeLeafObject{
+		mode: mode,
+		path: path,
+		sha:  sha,
+	}
+}
+
+func ParseTree(raw []byte) (list []*TreeLeafObject, err error) {
+	var (
+		pos  = 0
+		max  = len(raw)
+		leaf *TreeLeafObject
+	)
+
+	for pos < max {
+		pos, leaf, err = ParseLeaf(raw, pos)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, leaf)
+	}
+
+	return list, nil
+}
+
+func ParseLeaf(raw []byte, start int) (int, *TreeLeafObject, error) {
+	// modeの位置を取得
+	x := bytes.Index(raw[start:], []byte(" ")) + start
+	if !(x-start == 5 || x-start == 6) {
+		return -1, nil, errors.New("invalid leaf")
+	}
+	mode := string(raw[start:x])
+
+	y := bytes.Index(raw[x:], []byte("\x00")) + x
+	path := string(raw[x+1 : y])
+
+	return y + 21, NewTreeLeafObject(mode, path, fmt.Sprintf("%x", raw[y+1:y+21])), nil
 }
