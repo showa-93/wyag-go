@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -249,8 +250,8 @@ func NewListTreeCommand(args []string) *ListTreeCommand {
 
 	lc.Usage = func() {
 		o := flag.CommandLine.Output()
-		fmt.Fprint(o, "Usage: wyag-go log COMMIT\n")
-		fmt.Fprint(o, "\tDisplay history of a given commit.\n")
+		fmt.Fprint(o, "Usage: wyag-go ls-tree COMMIT\n")
+		fmt.Fprint(o, "\tPretty-print a tree object.\n")
 	}
 
 	lc.Parse(args)
@@ -292,6 +293,108 @@ func (lc *ListTreeCommand) Run() error {
 	return nil
 }
 
+type CheckoutCommand struct {
+	*flag.FlagSet
+	sha  string
+	path string
+}
+
+func NewCheckoutCommand(args []string) *CheckoutCommand {
+	c := &CheckoutCommand{}
+	c.FlagSet = flag.NewFlagSet("cat-file", flag.ExitOnError)
+	c.Usage = func() {
+		o := flag.CommandLine.Output()
+		fmt.Fprint(o, "Usage: checkout [OBJECT] [PATH]\n")
+		fmt.Fprint(o, "\tCheckout a commit inside of a directory.\n")
+	}
+
+	c.Parse(args)
+	if len(c.Args()) != 2 {
+		fmt.Printf("expected 1 arguments count=%d\n", len(c.Args()))
+		os.Exit(1)
+	}
+	c.sha = c.Args()[0]
+	c.path = c.Args()[1]
+
+	return c
+}
+
+func (cc *CheckoutCommand) Run() error {
+	repo, err := FindRepository(BasePath, false)
+	if err != nil {
+		return err
+	}
+
+	o, err := ReadObject(repo, FindObject(repo, cc.sha, "", false))
+	if err != nil {
+		return err
+	}
+
+	if o.TypeHeader() == Commit {
+		sha, ok := o.(*CommitObject).kvlm.Get("tree")
+		if !ok {
+			return errors.New("invalid commit")
+		}
+		if o, err = ReadObject(repo, sha[0]); err != nil {
+			return err
+		}
+	}
+
+	fi, err := os.Stat(cc.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(cc.path, os.FileMode(0755)); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+
+		if !fi.IsDir() {
+			return fmt.Errorf("not a directiry %s", cc.path)
+		}
+		entries, err := os.ReadDir(cc.path)
+		if err != nil {
+			return err
+		}
+
+		if len(entries) > 0 {
+			return fmt.Errorf("not a empty %s", cc.path)
+		}
+	}
+
+	return CheckoutTree(repo, o.(*TreeObject), cc.path)
+}
+
+func CheckoutTree(repo *Repository, tree *TreeObject, path string) error {
+	for _, item := range tree.items {
+		o, err := ReadObject(repo, item.sha)
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(path, item.path)
+
+		switch o.TypeHeader() {
+		case Tree:
+			if err := os.Mkdir(dest, os.FileMode(0755)); err != nil {
+				return err
+			}
+			return CheckoutTree(repo, o.(*TreeObject), dest)
+		case Blob:
+			f, err := os.OpenFile(dest, os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.FileMode(0644))
+			if err != nil {
+				return err
+			}
+			if _, err := f.Write(o.(*BlobObject).blobdata); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("expected subcommands")
@@ -314,6 +417,8 @@ func main() {
 		cmd = NewLogCommand(os.Args[2:])
 	case "ls-tree":
 		cmd = NewListTreeCommand(os.Args[2:])
+	case "checkout":
+		cmd = NewCheckoutCommand(os.Args[2:])
 	default:
 		fmt.Printf("unknown subcommand %s\n", os.Args[1])
 		os.Exit(1)
