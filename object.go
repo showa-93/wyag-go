@@ -53,6 +53,7 @@ func NewObject(typeHeader ObjectType, raw []byte) (Object, error) {
 	case Tree:
 		return NewTreeObject(raw)
 	case Tag:
+		return NewTagObject(raw), nil
 	case Blob:
 		return NewBlobObject(raw), nil
 	}
@@ -358,4 +359,23 @@ func ParseLeaf(raw []byte, start int) (int, *TreeLeafObject, error) {
 	path := string(raw[x+1 : y])
 
 	return y + 21, NewTreeLeafObject(mode, path, fmt.Sprintf("%x", raw[y+1:y+21])), nil
+}
+
+type TagObject struct {
+	CommitObject
+}
+
+func NewTagObject(raw []byte) *TagObject {
+	o := &TagObject{}
+	o.DeSerialize(raw)
+	return o
+}
+
+func (o *TagObject) TypeHeader() ObjectType {
+	return Tag
+}
+
+func CreateTag(name, object, tagType string) error {
+	// not implemant
+	return nil
 }

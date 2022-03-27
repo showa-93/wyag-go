@@ -488,6 +488,70 @@ func ListRef(repo *Repository, path string, refs []Ref) ([]Ref, error) {
 	return refs, err
 }
 
+type TagCommand struct {
+	*flag.FlagSet
+	isObject bool
+	name     string
+	object   string
+}
+
+func NewTagCommand(args []string) *TagCommand {
+	c := &TagCommand{
+		object: "HEAD",
+	}
+	c.FlagSet = flag.NewFlagSet("tag", flag.ExitOnError)
+	c.FlagSet.BoolVar(&c.isObject, "a", false, "Whether to create a tag object")
+
+	c.Usage = func() {
+		o := flag.CommandLine.Output()
+		fmt.Fprint(o, "Usage: wyag-go tag [-a] NAME [OBJECT]\n")
+		fmt.Fprint(o, "\tList and create tags\n")
+	}
+
+	c.Parse(args)
+	if len(c.Args()) > 2 {
+		fmt.Printf("expected less than 2 arguments count=%d\n", len(c.Args()))
+		os.Exit(1)
+	}
+
+	switch len(c.Args()) {
+	case 0:
+	case 1:
+		c.name = c.Args()[0]
+	default:
+		c.name = c.Args()[0]
+		c.object = c.Args()[1]
+	}
+
+	return c
+}
+
+func (c *TagCommand) Run() error {
+	repo, err := FindRepository(BasePath, false)
+	if err != nil {
+		return err
+	}
+	if c.name != "" {
+		tagType := "ref"
+		if c.isObject {
+			tagType = "object"
+		}
+		return CreateTag(c.name, c.object, tagType)
+	} else {
+		refs, err := ListRef(repo, "refs", nil)
+		if err != nil {
+			return err
+		}
+		for _, ref := range refs {
+			if strings.HasPrefix(ref.path, "refs/tags") {
+				fmt.Fprintf(os.Stdout, "%s %s\n", ref.sha, ref.path)
+			}
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("expected subcommands")
@@ -514,6 +578,8 @@ func main() {
 		cmd = NewCheckoutCommand(os.Args[2:])
 	case "show-ref":
 		cmd = NewShowRefCommand(os.Args[2:])
+	case "tag":
+		cmd = NewTagCommand(os.Args[2:])
 	default:
 		fmt.Printf("unknown subcommand %s\n", os.Args[1])
 		os.Exit(1)
