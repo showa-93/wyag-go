@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -134,8 +135,92 @@ func ReadObject(r *Repository, sha string) (Object, error) {
 	return NewObject(typeHeader, raw[x+y+1:])
 }
 
-func FindObject(r *Repository, name, typeHeader string, follow bool) string {
-	return name
+func FindObject(repo *Repository, name, typeHeader string, follow bool) (string, error) {
+	shaList, err := ResolveObject(repo, name)
+	if err != nil {
+		return "", err
+	}
+
+	if len(shaList) == 0 {
+		return "", fmt.Errorf("no such reference %s", name)
+	}
+
+	if len(shaList) > 1 {
+		return "", fmt.Errorf("ambiguous reference %s, candidates are %v", name, shaList)
+	}
+
+	sha := shaList[0]
+	t, ok := ConvertObjectType(typeHeader)
+	if !ok {
+		return sha, nil
+	}
+
+	for {
+		o, err := ReadObject(repo, sha)
+		if err != nil {
+			return "", err
+		}
+
+		if o.TypeHeader() == t {
+			return sha, nil
+		}
+
+		if !follow {
+			return "", nil
+		}
+
+		if o.TypeHeader() == Tag {
+			sha = o.(*TagObject).kvlm.m["object"][0]
+		} else if o.TypeHeader() == Commit && t == Tree {
+			sha = o.(*CommitObject).kvlm.m["tree"][0]
+		} else {
+			return "", nil
+		}
+	}
+}
+
+var hashReg = regexp.MustCompile("^[0-9A-Fa-f]{4,40}$")
+
+func ResolveObject(repo *Repository, name string) ([]string, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, nil
+	}
+
+	if name == "HEAD" {
+		ref, err := ResolveRef(repo, name)
+		if err != nil {
+			return nil, err
+		}
+		return []string{string(ref)}, nil
+	}
+
+	if hashReg.Match([]byte(name)) {
+		name = strings.ToLower(name)
+		if len(name) == 40 {
+			return []string{name}, nil
+		}
+
+		prefix := name[0:2]
+		path, err := repo.MakeDirectories("objects/"+prefix, false)
+		if err != nil {
+			return nil, err
+		}
+
+		rem := name[2:]
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return nil, err
+		}
+		objcts := []string{}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), rem) {
+				objcts = append(objcts, prefix+e.Name())
+			}
+		}
+		return objcts, nil
+	}
+
+	return nil, nil
 }
 
 func HashObject(f *os.File, t ObjectType, repo *Repository, write bool) (string, error) {

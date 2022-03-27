@@ -64,19 +64,19 @@ func CreateRepository(path string) (*Repository, error) {
 	}
 
 	{ // フォルダ作成
-		if _, err := r.makeDirectories("", true); err != nil {
+		if _, err := r.MakeDirectories("", true); err != nil {
 			return nil, err
 		}
-		if _, err := r.makeDirectories("branches", true); err != nil {
+		if _, err := r.MakeDirectories("branches", true); err != nil {
 			return nil, err
 		}
-		if _, err := r.makeDirectories("objects", true); err != nil {
+		if _, err := r.MakeDirectories("objects", true); err != nil {
 			return nil, err
 		}
-		if _, err := r.makeDirectories("refs/tags", true); err != nil {
+		if _, err := r.MakeDirectories("refs/tags", true); err != nil {
 			return nil, err
 		}
-		if _, err := r.makeDirectories("refs/heads", true); err != nil {
+		if _, err := r.MakeDirectories("refs/heads", true); err != nil {
 			return nil, err
 		}
 	}
@@ -123,7 +123,7 @@ func (r *Repository) Path(path string) string {
 }
 
 func (r *Repository) MakeFile(path string, mkdir bool) (f *os.File, err error) {
-	if _, err := r.makeDirectories(filepath.Dir(path), mkdir); err != nil {
+	if _, err := r.MakeDirectories(filepath.Dir(path), mkdir); err != nil {
 		return nil, err
 	}
 
@@ -152,7 +152,7 @@ func (r *Repository) MakeFile(path string, mkdir bool) (f *os.File, err error) {
 	return
 }
 
-func (r *Repository) makeDirectories(path string, mkdir bool) (string, error) {
+func (r *Repository) MakeDirectories(path string, mkdir bool) (string, error) {
 	path = strings.Trim(path, string(os.PathSeparator)) + string(os.PathSeparator)
 
 	var i int

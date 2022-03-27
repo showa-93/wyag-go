@@ -204,7 +204,10 @@ func (lc *LogCommand) Run() error {
 	}
 
 	fmt.Fprintln(os.Stdout, "digraph wyaglog{")
-	sha := FindObject(repo, lc.sha, string(Commit), false)
+	sha, err := FindObject(repo, lc.sha, string(Commit), false)
+	if err != nil {
+		return err
+	}
 	LogGraphviz(repo, sha, make(map[string]struct{}))
 	fmt.Fprintln(os.Stdout, "}")
 	return nil
@@ -271,7 +274,10 @@ func (lc *ListTreeCommand) Run() error {
 		return err
 	}
 
-	sha := FindObject(repo, lc.sha, string(Tree), false)
+	sha, err := FindObject(repo, lc.sha, string(Tree), false)
+	if err != nil {
+		return err
+	}
 	o, err := ReadObject(repo, sha)
 	if err != nil {
 		return err
@@ -326,7 +332,11 @@ func (cc *CheckoutCommand) Run() error {
 		return err
 	}
 
-	o, err := ReadObject(repo, FindObject(repo, cc.sha, "", false))
+	name, err := FindObject(repo, cc.sha, "", false)
+	if err != nil {
+		return err
+	}
+	o, err := ReadObject(repo, name)
 	if err != nil {
 		return err
 	}
@@ -552,6 +562,46 @@ func (c *TagCommand) Run() error {
 	return nil
 }
 
+type RevParseCommand struct {
+	*flag.FlagSet
+	wyagType string
+	name     string
+}
+
+func NewRevParseCommand(args []string) *RevParseCommand {
+	c := &RevParseCommand{}
+	c.FlagSet = flag.NewFlagSet("rev-parse", flag.ExitOnError)
+	c.FlagSet.StringVar(&c.wyagType, "wyag-type", "", "Specify the expected type")
+
+	c.Usage = func() {
+		o := flag.CommandLine.Output()
+		fmt.Fprint(o, "Usage: wyag-go rev-parse [--wyag-type] [TYPE] NAME\n")
+		fmt.Fprint(o, "\tParse revision (or other objects )identifiers\n")
+	}
+
+	c.Parse(args)
+	if len(c.Args()) != 1 {
+		fmt.Printf("expected 1 arguments count=%d\n", len(c.Args()))
+		os.Exit(1)
+	}
+	c.name = c.Args()[0]
+
+	return c
+}
+
+func (c *RevParseCommand) Run() error {
+	repo, err := FindRepository(BasePath, false)
+	if err != nil {
+		return err
+	}
+	sha, err := FindObject(repo, c.name, string(c.wyagType), true)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, sha)
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("expected subcommands")
@@ -580,6 +630,8 @@ func main() {
 		cmd = NewShowRefCommand(os.Args[2:])
 	case "tag":
 		cmd = NewTagCommand(os.Args[2:])
+	case "rev-parse":
+		cmd = NewRevParseCommand(os.Args[2:])
 	default:
 		fmt.Printf("unknown subcommand %s\n", os.Args[1])
 		os.Exit(1)
